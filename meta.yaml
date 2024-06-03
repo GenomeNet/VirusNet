@@ -37,7 +37,6 @@ test:
 about:
   home: https://github.com/genomenet/virusnet
   license: MIT
-  license_file: LICENSE
   summary: A package for classifying virus using deep learning models.
   description: |
     VirusNet is a package that uses machine learning models to classify virus genus based on genomic sequences. 
