@@ -26,6 +26,7 @@ jobs:
       run: |
         conda install mamba -c conda-forge
         mamba init
+        source /home/runner/.bashrc
     - name: Build package 
       shell: bash -l {0}
       run: |
