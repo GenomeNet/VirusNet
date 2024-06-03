@@ -14,15 +14,15 @@ jobs:
           activate-environment: test-env
           python-version: '3.11'
           channels: conda-forge
-      - name: Install Mamba and conda-build
+      - name: Install Mamba and Boa
         shell: bash -l {0}
         run: |
-          conda install mamba conda-build -c conda-forge
-      - name: Build package
+          conda install mamba boa -c conda-forge
+      - name: Build package with Mamba
         shell: bash -l {0}
         run: |
-          conda build .
-          conda install --use-local virusnet -y
+          boa build .
+          mamba install --use-local virusnet -y
       - name: Test package
         shell: bash -l {0}
         run: |
