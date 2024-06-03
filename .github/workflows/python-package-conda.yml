@@ -1,0 +1,30 @@
+name: Build and Test Condo Package
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v3
+      with:
+        python-version: '3.11'
+    - name: Add conda to system path
+      run: |
+        echo $CONDA/bin >> $GITHUB_PATH
+    - name: Install dependencies
+      run: |
+        conda install -c conda-forge mamba
+        mamba env create -f meta.yaml
+        conda activate virusnet
+    - name: Test package
+      run: |
+        # Run your tests here
+        # For example, if you have R tests:
+        Rscript -e "devtools::test()"
+    - name: Build condo package
+      run: |
+        conda build .
