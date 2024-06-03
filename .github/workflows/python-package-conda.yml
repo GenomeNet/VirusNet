@@ -1,4 +1,4 @@
-name: Build and Test Condo Package
+name: Build and Test Conda Package
 on:
   push:
     branches:
@@ -17,8 +17,9 @@ jobs:
         echo $CONDA/bin >> $GITHUB_PATH
     - name: Install dependencies
       run: |
+        rm -rf /usr/share/miniconda
         conda install -c conda-forge mamba
-        mamba env create -f meta.yaml
+        mamba env create -f environment.yml
         conda activate virusnet
     - name: Test package
       run: |
