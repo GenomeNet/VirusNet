@@ -1,0 +1,44 @@
+package:
+  name: virusnet
+  version: 1.0.0
+
+source:
+  path: .
+
+build:
+  number: 0
+  script:
+    - bash run.sh
+
+requirements:
+  build:
+    - python 3.11
+    - setuptools
+  run:
+    - python >=3.11
+    - numpy
+    - r-base 4.3.1
+    - r-devtools
+    - r-optparse
+    - r-zoo
+    - r-reticulate
+    - r-tfruns
+    - r-tfautograph
+    - r-mass
+    - r-mgcv
+    - h5py 3.9.0
+    - keras 2.12.0
+    - tensorflow 2.12.1
+
+test:
+  commands:
+    - virusnet --help
+
+about:
+  home: https://github.com/genomenet/virusnet
+  license: MIT
+  license_file: LICENSE
+  summary: A package for classifying virus using deep learning models.
+  description: |
+    VirusNet is a package that uses machine learning models to classify virus genus based on genomic sequences. 
+    The model has been trained on high quality genomes from the International Committee on Taxonomy of Viruses (ICTV).
