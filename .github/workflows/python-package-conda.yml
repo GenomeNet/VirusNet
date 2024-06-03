@@ -29,7 +29,7 @@ jobs:
       shell: bash -l {0}
       run: |
         mamba create --name test-env python=3.11 -y
-        conda activate test-env
+        mamba activate test-env
         conda mambabuild .
         conda install --use-local virusnet -y
     - name: Test package 
