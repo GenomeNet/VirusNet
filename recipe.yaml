@@ -3,12 +3,10 @@ package:
   version: 1.0.0
 
 source:
-  path: .
+  path: virusnet/
 
 build:
-  number: 0
-  script:
-    - bash run.sh
+  noarch: python
 
 requirements:
   build:
@@ -18,6 +16,7 @@ requirements:
     - python >=3.11
     - numpy
     - r-base 4.3.1
+    - r-keras
     - r-devtools
     - r-optparse
     - r-zoo
@@ -28,7 +27,7 @@ requirements:
     - r-mgcv
     - h5py 3.9.0
     - keras 2.12.0
-    - tensorflow 2.12.1
+    - tensorflow-cpu 2.12.1
 
 test:
   commands:
