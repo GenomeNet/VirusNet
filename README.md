@@ -1,5 +1,7 @@
 # VirusNet
 
+[![Build and Test Conda Package](https://github.com/GenomeNet/VirusNet/actions/workflows/python-package-conda.yml/badge.svg)](https://github.com/GenomeNet/VirusNet/actions/workflows/python-package-conda.yml)
+
 ## Build
 
 ```
