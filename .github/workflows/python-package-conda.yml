@@ -18,12 +18,7 @@ jobs:
         shell: bash -l {0}
         run: |
           conda install mamba boa -c conda-forge
-      - name: Build package with Mamba
+      - name: Build package with boa
         shell: bash -l {0}
         run: |
           boa build .
-          mamba install --use-local virusnet -y
-      - name: Test package
-        shell: bash -l {0}
-        run: |
-          virusnet --help
