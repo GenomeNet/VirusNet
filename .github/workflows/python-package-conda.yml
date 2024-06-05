@@ -18,7 +18,18 @@ jobs:
         shell: bash -l {0}
         run: |
           conda install mamba boa -c conda-forge
+      - name: Install Anaconda Client
+        shell: bash -l {0}
+        run: |
+          conda install anaconda-client
       - name: Build package with boa
         shell: bash -l {0}
         run: |
           boa build .
+      - name: Upload package to Anaconda
+        shell: bash -l {0}
+        env:
+          ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}
+        run: |
+          anaconda login --username GenomeNet --password "$ANACONDA_API_TOKEN"
+    
