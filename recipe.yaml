@@ -1,13 +1,13 @@
 package:
   name: virusnet
-  version: 1.0.0
+  version: 0.9.5
 
 source:
   path: virusnet/
 
 build:
   noarch: python
-  number: 3
+  number: 0
 
   # This is required to make R link correctly on Linux.
   rpaths:
