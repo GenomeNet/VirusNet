@@ -5,9 +5,12 @@ mkdir -p $PREFIX/bin
 # Install the Python script
 echo "Installing the scripts..."
 cp $SRC_DIR/virusnet.py $PREFIX/bin/virusnet
-cp $SRC_DIR/predict.r $PREFIX/bin/predict.r
 cp $SRC_DIR/utils.r $PREFIX/bin/utils.r
+cp $SRC_DIR/setup_logger.r $PREFIX/bin/setup_logger.r 
 
+cp $SRC_DIR/predict_genus.r $PREFIX/binpredict_genus.r
+cp $SRC_DIR/predict_binary.r $PREFIX/predict_binary.r
+cp $SRC_DIR/predict_binary_metagenome.r $PREFIX/predict_binary_metagenome.r
 
 # Set the R library directory
 mkdir -p "$PREFIX/lib/R/library"
