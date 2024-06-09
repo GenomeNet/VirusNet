@@ -2,6 +2,15 @@
 
 [![Build and Test Conda Package](https://github.com/GenomeNet/VirusNet/actions/workflows/python-package-conda.yml/badge.svg)](https://github.com/GenomeNet/VirusNet/actions/workflows/python-package-conda.yml) [![Anaconda-Server Badge](https://anaconda.org/genomenet/virusnet/badges/version.svg)](https://anaconda.org/genomenet/virusnet) [![Anaconda-Server Badge](https://anaconda.org/genomenet/virusnet/badges/latest_release_relative_date.svg)](https://anaconda.org/genomenet/virusnet) [![Anaconda-Server Badge](https://anaconda.org/genomenet/virusnet/badges/downloads.svg)](https://anaconda.org/genomenet/virusnet)
 
+## Install
+
+Make sure you have conda installed. If you don't have it installed, you can download and install Miniconda from the official website: https://docs.conda.io/en/latest/miniconda.html
+
+```
+conda create -n virusnet python=3.11
+conda activate virusnet
+conda install -c genomenet virusnet
+```
 
 ## Usage
 
@@ -57,4 +66,5 @@ Contig 1: Virus - Alphacoronavirus, Probability - 37%
 mamba create -n build-env python=3.11 boa -y
 micromamba activate build-env
 boa build .
+anaconda upload --user genomenet --channel genomenet path_to_virusnet.tar.bz2
 ```
