@@ -8,9 +8,9 @@ cp $SRC_DIR/virusnet.py $PREFIX/bin/virusnet
 cp $SRC_DIR/utils.r $PREFIX/bin/utils.r
 cp $SRC_DIR/setup_logger.r $PREFIX/bin/setup_logger.r 
 
-cp $SRC_DIR/predict_genus.r $PREFIX/binpredict_genus.r
-cp $SRC_DIR/predict_binary.r $PREFIX/predict_binary.r
-cp $SRC_DIR/predict_binary_metagenome.r $PREFIX/predict_binary_metagenome.r
+cp $SRC_DIR/predict_genus.r $PREFIX/bin/predict_genus.r
+cp $SRC_DIR/predict_binary.r $PREFIX/bin/predict_binary.r
+cp $SRC_DIR/predict_binary_metagenome.r $PREFIX/bin/predict_binary_metagenome.r
 
 # Set the R library directory
 mkdir -p "$PREFIX/lib/R/library"
