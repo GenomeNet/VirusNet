@@ -7,9 +7,9 @@
 Make sure you have conda installed. If you don't have it installed, you can download and install Miniconda from the official website: https://docs.conda.io/en/latest/miniconda.html
 
 ```
-conda create -n virusnet python=3.11
+conda create -n virusnet python=3.11 -y
 conda activate virusnet
-conda install -c genomenet virusnet
+conda install genomenet::virusnet
 ```
 
 ## Usage
@@ -63,7 +63,7 @@ Contig 1: Virus - Alphacoronavirus, Probability - 37%
 ### Building this conda package
 
 ```
-mamba create -n build-env python=3.11 boa -y
+mamba create -n build-env python=3.11 boa anaconda-client -y
 micromamba activate build-env
 boa build .
 anaconda upload --user genomenet --channel genomenet path_to_virusnet.tar.bz2
