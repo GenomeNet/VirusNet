@@ -18,10 +18,35 @@ Make predictions
 virusnet predict --mode binary --input test/covid.fasta --output results_binary
 ```
 
+This output will be written to the screen
+````
+ [INFO] Checking input file 
+ [INFO] Number of FASTA entries in the file: 1 
+ [INFO] Loading binary model 
+ [INFO] Performing predictions 
+ [INFO] Using non-metagenomic mode 
+ [INFO] Summarized results written to: results_binary/binary_results_summarized.csv 
+ [INFO] Non-summarized results written to: results_binary/binary_results.csv 
+ [INFO] Number of contigs classified as viral: 1 
+ [INFO] Number of contigs classified as non-viral: 0 
+ [INFO] FASTA data written to: results_binary/viral_contigs.fasta 
+ [WARN] No contigs found 
+ ```
+
 ```
 virusnet predict --mode genus --input test/covid.fasta --output results_genus
 ```
 
+Which will produce this output
+
+```
+ [INFO] Checking input file 
+ [INFO] Number of FASTA entries in the file: 1 
+ [INFO] Loading genus model 
+ [INFO] Performing genus predictions 
+Contig Summary:
+Contig 1: Virus - Alphacoronavirus, Probability - 37%
+```
 
 ## Development
 
