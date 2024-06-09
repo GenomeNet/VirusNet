@@ -13,17 +13,22 @@ virusnet download
 
 Make predictions
 
+
 ```
-virusnet predict --input file.fasta
+virusnet predict --mode binary --input test/covid.fasta --output results_binary
 ```
+
+```
+virusnet predict --mode genus --input test/covid.fasta --output results_genus
+```
+
 
 ## Development
 
 ### Building this conda package
 
 ```
-mamba create -n build-env python=3.11 -y
+mamba create -n build-env python=3.11 boa -y
 micromamba activate build-env
-mamba install boa -y
 boa build .
 ```
