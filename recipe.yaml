@@ -20,6 +20,7 @@ requirements:
     - gcc
     - setuptools
     - r-base 4.3.1
+    - r-hdf5r
     - numpy
     - r-keras
     - r-remotes
@@ -39,14 +40,17 @@ requirements:
     - libgcc
     - numpy
     - r-base 4.3.1
+    - r-hdf5r
     - r-keras
     - r-optparse
     - r-zoo
+    - r-purrr
     - r-reticulate
     - r-tfruns
     - r-tfautograph
     - r-mass
     - r-mgcv
+    - r-futile.logger
     - h5py 3.9.0
     - keras 2.12.0
     - tensorflow-cpu 2.12.1
