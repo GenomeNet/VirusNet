@@ -12,6 +12,8 @@ conda activate virusnet
 conda install genomenet::virusnet
 ```
 
+In case the install step fails, you might need to add additinal conda channel for the dependencies `conda install -c anaconda -c conda-forge -c genomenet virusnet`
+
 ## Usage
 
 Download the models
