@@ -9,10 +9,8 @@ Make sure you have conda installed. If you don't have it installed, you can down
 ```bash
 conda create -n virusnet python=3.11 -y
 conda activate virusnet
-conda install genomenet::virusnet -y
+conda install -c anaconda -c conda-forge -c genomenet virusnet -y
 ```
-
-In case the install step fails, you might need to add additinal conda channel for the dependencies `conda install -c anaconda -c conda-forge -c genomenet virusnet`
 
 ## Installation using Mamba (recommended)
 
