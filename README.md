@@ -18,7 +18,7 @@ conda install -c anaconda -c conda-forge -c genomenet virusnet -y
 conda install mamba -c conda-forge -y
 mamba create -n virusnet python=3.11 -y
 mamba activate virusnet
-mamba install genomenet::virusnet -y
+mamba install -c genomenet -c anaconda -c conda-forge genomenet::virusnet -y
 ```
 
 ## Usage
