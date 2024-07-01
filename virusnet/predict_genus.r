@@ -18,8 +18,16 @@ suppressWarnings(suppressPackageStartupMessages({
   library(futile.logger)
 }))
 
-invisible(source("virusnet/utils.r"))
-invisible(source("virusnet/setup_logger.r"))
+
+# Get the base directory of the Conda environment
+conda_prefix <- Sys.getenv("CONDA_PREFIX")
+
+#invisible(source("utils.r"))
+#invisible(source("setup_logger.r"))
+
+# Source the R scripts
+invisible(source(file.path(conda_prefix, "bin", "utils.r")))
+invisible(source(file.path(conda_prefix, "bin", "setup_logger.r")))
 
 # Parse command line arguments
 args <- commandArgs(trailingOnly = TRUE)

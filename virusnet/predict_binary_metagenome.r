@@ -18,8 +18,12 @@ suppressWarnings(suppressPackageStartupMessages({
   library(futile.logger)
 }))
 
-invisible(source("virusnet/utils.r"))
-invisible(source("virusnet/setup_logger.r"))
+# Get the base directory of the Conda environment
+conda_prefix <- Sys.getenv("CONDA_PREFIX")
+
+# Source the R scripts
+invisible(source(file.path(conda_prefix, "bin", "utils.r")))
+invisible(source(file.path(conda_prefix, "bin", "setup_logger.r")))
 
 # Function to safely write FASTA if not empty
 safe_write_fasta <- function(fasta_subset, file_path) {
