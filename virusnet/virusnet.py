@@ -6,9 +6,15 @@ import argparse
 import json
 import urllib.request
 import hashlib
+import sys
 
 def download_models(download_path):
-    with open('models.json', 'r') as file:
+    models_path = os.path.join(sys.prefix, 'bin', 'models.json')
+    print(f"Looking for models.json at: {models_path}")  # Debugging line
+    if not os.path.exists(models_path):
+        raise FileNotFoundError(f"models.json not found at {models_path}")
+    
+    with open(models_path, 'r') as file:
         models = json.load(file)
     os.makedirs(download_path, exist_ok=True)
     print(f"Models will be downloaded to: {download_path}")
@@ -51,7 +57,11 @@ def verify_file_hash(file_path, expected_hash):
     return calculated_hash == expected_hash
 
 def check_files(download_path):
-    with open('models.json', 'r') as file:
+    models_path = os.path.join(sys.prefix, 'bin', 'models.json')
+    if not os.path.exists(models_path):
+        raise FileNotFoundError(f"models.json not found at {models_path}")
+    
+    with open(models_path, 'r') as file:
         models = json.load(file)
     for key, model_info in models.items():
         file_path = os.path.join(download_path, os.path.basename(model_info['url']))
@@ -108,7 +118,7 @@ if __name__ == "__main__":
         download_models(args.path)
     elif args.command == 'predict':
         if check_files(args.path):
-            model_paths = {key: os.path.join(args.path, os.path.basename(info['url'])) for key, info in json.load(open('models.json')).items()}
+            model_paths = {key: os.path.join(args.path, os.path.basename(info['url'])) for key, info in json.load(open(os.path.join(sys.prefix, 'bin', 'models.json'))).items()}
             run_prediction(args.input, args.output, model_paths, args.step_size, args.batch_size, args.mode, args.metagenome)
         else:
             print("Model files are missing or corrupted. Please download them again.")
