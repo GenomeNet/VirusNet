@@ -58,8 +58,19 @@ requirements:
 test:
   commands:
     - virusnet --help
-    - R --vanilla -e "library(keras)"
-    - R --vanilla -e "library(deepG)"
+    - R --vanilla -e "print(.libPaths()); library(keras)"
+    - >
+      R --vanilla -e "
+      .libPaths(c('$PREFIX/lib/R/library', .libPaths())); 
+      tryCatch({
+        library(deepG); 
+        print('deepG loaded successfully')
+      }, error=function(e) {
+        print(.libPaths()); 
+        message('Error loading deepG: ', e$message); 
+        system('find $PREFIX/lib/R -type d | grep deepG'); 
+        quit(status=1)
+      })"
 
 
 about:
