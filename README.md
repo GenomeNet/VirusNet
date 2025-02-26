@@ -71,9 +71,40 @@ Contig 1: Virus - Alphacoronavirus, Probability - 37%
 
 ### Building this conda package
 
+
 ```
-mamba create -n build-env python=3.11 boa anaconda-client -y
+# Create a fresh build environment
+micromamba create -n build-env python=3.11 boa anaconda-client r-base=4.3.1 r-remotes -c conda-forge -y
 micromamba activate build-env
-boa build .
-anaconda upload --user genomenet --channel genomenet path_to_virusnet.tar.bz2
+
+# Clean any previous builds
+rm -rf ~/micromamba/envs/build-env/conda-bld/
+
+# Set environment variables for R
+export R_MAX_VSIZE=8Gb
+mkdir -p ~/.R
+echo 'options(repos = c(CRAN = "https://cloud.r-project.org"))' > ~/.Rprofile
+
+# Build the package
+boa build . #  writes something like this to the screen /home/pmuench/micromamba/envs/build-env/conda-bld/noarch/virusnet-0.9.5-hadc6f11_0.tar.bz2
+
+# Upload 
+anaconda upload --user genomenet --channel genomenet /home/pmuench/micromamba/envs/build-env/conda-bld/noarch/virusnet-0.9.5-hadc6f11_0.tar.bz2
+
+conda index ~/micromamba/envs/build-env/conda-bld/
+
+# Deactivate the build environment
+micromamba deactivate
+
+# Clean micromamba cache to avoid any issues
+micromamba clean --all -y
+
+# Create a fresh test environment
+micromamba create -n virusnet-test python=3.11 -y
+micromamba activate virusnet-test
+
+# Method 1: Install from local channel (preferred)
+micromamba install ~/micromamba/envs/build-env/conda-bld/noarch/virusnet-0.9.5-hadc6f11_0.tar.bz2 -y
+
+virusnet -h
 ```
