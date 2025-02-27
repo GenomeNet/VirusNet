@@ -98,6 +98,10 @@ final_df <- do.call(rbind, all_contig_states)
 colnames(final_df) <- c(genus_labels, "position", "contig_ID")
 final_df$contig_name <- contig_names[final_df$contig]
 
+# Print debug information about contig names
+cat("Debug - First few contig names:\n")
+print(head(contig_names))
+
 # Summarize data for each contig_name
 contig_summary <- final_df %>%
   group_by(contig_name) %>%
@@ -110,15 +114,33 @@ contig_summary <- contig_summary %>%
          max_virus = names(.)[max_index + 1],  # +1 to adjust for the contig_name column
          max_probability = max(c_across(starts_with("mean_")))) %>%
   ungroup()
+
+# Explicitly add a clean_taxon column without the "mean_" prefix
+contig_summary$clean_taxon <- sapply(contig_summary$max_virus, function(x) {
+  if (is.character(x) && startsWith(x, "mean_")) {
+    return(substring(x, 6))  # Remove "mean_" prefix
+  } else {
+    return(as.character(x))
+  }
+})
+
+# Print debug information about the contig IDs
+cat("Debug - Contig IDs from summary:\n")
+contig_ids <- sapply(contig_summary$contig_name, function(x) strsplit(x, " ")[[1]][1])
+print(head(contig_ids))
+
+cat("Detailed summary of taxa predictions:\n")
+print(contig_summary[, c("contig_name", "max_virus", "clean_taxon", "max_probability")])
+
 contig_summary <- as.data.frame(contig_summary)
 
 df <- data.frame(contig_index = seq_along(contig_summary$contig_name),
-                 max_virus = substring(contig_summary$max_virus, 6),
+                 max_virus = contig_summary$clean_taxon,  # Use the clean taxon name
                  prop = round(contig_summary$max_probability, digits = 2) * 100)
 
 cat("Contig Summary:\n")
 for (i in 1:nrow(df)) {
-  cat(sprintf("Contig %d: Virus - %s, Probability - %d%%\n", df$contig_index[i], df$max_virus[i], df$prop[i]))
+  cat(sprintf("Contig %d: Virus - %s, Probability - %.0f%%\n", df$contig_index[i], df$max_virus[i], df$prop[i]))
 }
 
 write.csv(final_df, paste0(output_directory, "/genus_output.csv"), row.names = FALSE, quote = FALSE)

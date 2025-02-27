@@ -104,7 +104,7 @@ micromamba create -n virusnet-test python=3.11 -y
 micromamba activate virusnet-test
 
 # Method 1: Install from local channel (preferred)
-micromamba install ~/micromamba/envs/build-env/conda-bld/noarch/virusnet-0.9.5-hadc6f11_0.tar.bz2 -y
+micromamba install /home/pmuench/micromamba/envs/build-env/conda-bld/noarch/virusnet-0.9.5-hadc6f11_0.tar.bz2 -y
 
 virusnet -h
 ```
