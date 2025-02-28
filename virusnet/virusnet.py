@@ -12,6 +12,16 @@ import tempfile as tempfile_module
 import shutil
 from Bio import SeqIO
 
+# List of known bacteriophage genera
+BACTERIOPHAGE_GENERA = [
+    "Cystovirus", "Inovirus", "Nonagvirus", "Ceduovirus", "Biseptimavirus", 
+    "Moineauvirus", "Felixounavirus", "Claudivirus", "Pbunavirus", "Phikmvvirus", 
+    "Tequatrovirus", "Lambdavirus", "Brussowvirus", "Kayfunavirus", "Bruynoghevirus", 
+    "Lederbergvirus", "Peduovirus", "Kuttervirus", "Kayvirus", "Dhillonvirus", 
+    "Friunavirus", "Drulisvirus", "Casadabanvirus", "Benedictvirus", "Skunavirus", 
+    "Jiaodavirus", "Phietavirus", "Pakpunavirus", "Aureusvirus", "Fletchervirus"
+]
+
 def download_models(download_path, verify=False):
     models_path = os.path.join(sys.prefix, 'bin', 'models.json')
     print(f"Looking for models.json at: {models_path}")
@@ -83,6 +93,206 @@ def check_files(download_path, verify=False):
             return False
     return True
 
+def generate_simplified_genus_output(genus_summary_path, output_path):
+    """
+    Generate a simplified genus output file with just the contig name, most likely genus, its probability,
+    and a flag indicating if it's a bacteriophage.
+    """
+    try:
+        # Read the genus summary CSV
+        try:
+            genus_df = pd.read_csv(genus_summary_path)
+        except Exception:
+            # Try with different CSV reading options if the default fails
+            genus_df = pd.read_csv(genus_summary_path, sep=None, engine='python')
+        
+        # Create a new simplified dataframe
+        simplified_df = pd.DataFrame()
+        simplified_df['contig_name'] = genus_df['contig_name']
+        
+        # Determine which column to use for the most likely genus
+        if 'clean_taxon' in genus_df.columns:
+            simplified_df['most_likely_genus'] = genus_df['clean_taxon']
+        elif 'max_virus' in genus_df.columns:
+            # Strip 'mean_' prefix if present
+            simplified_df['most_likely_genus'] = genus_df['max_virus'].apply(
+                lambda x: x[5:] if isinstance(x, str) and x.startswith('mean_') else x
+            )
+        else:
+            # Calculate the most likely genus from mean columns
+            raise ValueError("Could not find clean_taxon or max_virus columns in genus summary")
+        
+        # Add the probability column
+        if 'max_probability' in genus_df.columns:
+            simplified_df['probability'] = genus_df['max_probability']
+        else:
+            # Try to find the maximum probability among mean columns
+            mean_cols = [col for col in genus_df.columns if col.startswith('mean_')]
+            if mean_cols:
+                simplified_df['probability'] = genus_df.apply(lambda row: max([row[col] for col in mean_cols]), axis=1)
+            else:
+                raise ValueError("Could not find probability information in genus summary")
+        
+        # Ensure probability is formatted as a percentage
+        simplified_df['probability'] = simplified_df['probability'].apply(lambda x: round(float(x) * 100, 2))
+        
+        # Add the bacteriophage flag
+        simplified_df['is_bacteriophage'] = simplified_df['most_likely_genus'].apply(
+            lambda x: 'TRUE' if any(phage.lower() == str(x).lower() for phage in BACTERIOPHAGE_GENERA) else 'FALSE'
+        )
+        
+        # Save to CSV
+        simplified_df.to_csv(output_path, index=False)
+        print(f"Simplified genus output saved to {output_path}")
+        return True
+    except Exception as e:
+        print(f"Error generating simplified genus output: {str(e)}")
+        return False
+
+def generate_combined_output(binary_results_path, genus_summary_path, output_path, virus_threshold=0.5, include_std_dev=True):
+    """
+    Generate a combined output file that includes all contigs with their binary classification
+    and genus information (for viral contigs).
+    
+    Parameters:
+    -----------
+    binary_results_path : str
+        Path to the binary classification results CSV file
+    genus_summary_path : str
+        Path to the genus summary CSV file
+    output_path : str
+        Path to save the combined output file
+    virus_threshold : float
+        Threshold for classifying a contig as viral
+    include_std_dev : bool
+        Whether to include the standard deviation column in the output
+    """
+    try:
+        # Read the binary classification results
+        binary_df = pd.read_csv(binary_results_path)
+        
+        # Check if we have a summarized version with standard deviation
+        binary_summarized_path = binary_results_path.replace("binary_results.csv", "binary_results_summarized.csv")
+        if os.path.exists(binary_summarized_path) and include_std_dev:
+            try:
+                binary_summarized_df = pd.read_csv(binary_summarized_path)
+                
+                # Check if this is from metagenome mode (simplified format) or regular mode
+                if 'sd_is_virus' in binary_summarized_df.columns:
+                    # Regular mode with multiple predictions per contig
+                    # Create a mapping of contig names to their standard deviation
+                    sd_mapping = {}
+                    for _, row in binary_summarized_df.iterrows():
+                        sd_mapping[row['contig_name']] = row.get('sd_is_virus', 0)
+                    
+                    # Add standard deviation column to the main dataframe
+                    binary_df['virus_std_dev'] = binary_df['contig_name'].apply(
+                        lambda x: round(sd_mapping.get(x, 0) * 100, 2) if x in sd_mapping else 0
+                    )
+                else:
+                    # Metagenome mode with one prediction per contig
+                    print("Metagenome mode detected - using simplified format with no standard deviation")
+                    # Add a default std_dev column of zeros
+                    binary_df['virus_std_dev'] = 0
+            except Exception as e:
+                print(f"Warning: Could not process binary summarized results: {str(e)}")
+                # Add a default std_dev column
+                binary_df['virus_std_dev'] = 0
+        elif include_std_dev:
+            # If no summarized file exists but std_dev is requested, add a default std_dev column
+            binary_df['virus_std_dev'] = 0
+        
+        # Initialize genus-related columns
+        binary_df['most_likely_genus'] = 'NA'
+        binary_df['genus_probability'] = 0.0
+        binary_df['is_bacteriophage'] = 'FALSE'
+        
+        # Read genus summary if it exists
+        if os.path.exists(genus_summary_path):
+            try:
+                genus_df = pd.read_csv(genus_summary_path)
+                
+                # Create a mapping of contig names to genus information
+                genus_info = {}
+                
+                # Determine which columns to use
+                genus_col = 'clean_taxon' if 'clean_taxon' in genus_df.columns else 'max_virus'
+                prob_col = 'max_probability' if 'max_probability' in genus_df.columns else None
+                
+                if genus_col and prob_col:
+                    for _, row in genus_df.iterrows():
+                        contig_name = row['contig_name']
+                        # Handle possible different naming conventions
+                        contig_id = contig_name.split()[0]
+                        
+                        # Get the genus name, removing 'mean_' prefix if present
+                        genus = row[genus_col]
+                        if isinstance(genus, str) and genus.startswith('mean_'):
+                            genus = genus[5:]
+                            
+                        # Store both the full name and the ID for matching
+                        genus_info[contig_name] = {
+                            'genus': genus,
+                            'probability': row[prob_col]
+                        }
+                        genus_info[contig_id] = {
+                            'genus': genus,
+                            'probability': row[prob_col]
+                        }
+                    
+                    # Update the binary dataframe with genus information for viral contigs
+                    for idx, row in binary_df.iterrows():
+                        if row['virus'] >= virus_threshold:
+                            contig_name = row['contig_name']
+                            contig_id = contig_name.split()[0]
+                            
+                            if contig_name in genus_info:
+                                binary_df.at[idx, 'most_likely_genus'] = genus_info[contig_name]['genus']
+                                binary_df.at[idx, 'genus_probability'] = round(genus_info[contig_name]['probability'] * 100, 2)
+                            elif contig_id in genus_info:
+                                binary_df.at[idx, 'most_likely_genus'] = genus_info[contig_id]['genus']
+                                binary_df.at[idx, 'genus_probability'] = round(genus_info[contig_id]['probability'] * 100, 2)
+                            else:
+                                binary_df.at[idx, 'most_likely_genus'] = 'Unknown_virus'
+                
+                # Add the bacteriophage flag
+                binary_df['is_bacteriophage'] = binary_df['most_likely_genus'].apply(
+                    lambda x: 'TRUE' if any(phage.lower() == str(x).lower() for phage in BACTERIOPHAGE_GENERA) else 'FALSE'
+                )
+                
+            except Exception as e:
+                print(f"Warning: Could not process genus summary: {str(e)}")
+                # Mark viral contigs with unknown genus
+                for idx, row in binary_df.iterrows():
+                    if row['virus'] >= virus_threshold:
+                        binary_df.at[idx, 'most_likely_genus'] = 'Unknown_virus'
+        
+        # Format probabilities as percentages
+        binary_df['virus'] = binary_df['virus'].apply(lambda x: round(float(x) * 100, 2))
+        if 'non_virus' in binary_df.columns:
+            binary_df['non_virus'] = binary_df['non_virus'].apply(lambda x: round(float(x) * 100, 2))
+        
+        # Rename columns for clarity
+        binary_df = binary_df.rename(columns={
+            'virus': 'virus_probability',
+            'non_virus': 'non_virus_probability'
+        })
+        
+        # Add a clear virus classification column
+        binary_df['is_virus'] = binary_df['virus_probability'].apply(
+            lambda x: 'TRUE' if x >= virus_threshold * 100 else 'FALSE'
+        )
+        
+        # Save to CSV
+        binary_df.to_csv(output_path, index=False)
+        print(f"Combined output saved to {output_path}")
+        return True
+    except Exception as e:
+        print(f"Error generating combined output: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 def run_prediction(input, output, model_paths, step_size=1000, batch_size=100, mode='binary', metagenome=False, virus_threshold=0.5, genus_threshold=0.5):
     """
     Function to run the R script for virus prediction using the specified arguments.
@@ -110,6 +320,13 @@ def run_prediction(input, output, model_paths, step_size=1000, batch_size=100, m
         '--genus_threshold', str(genus_threshold)
     ]
     subprocess.run(command)
+    
+    # Generate the simplified genus output if in genus mode
+    if mode == 'genus':
+        genus_summary_path = os.path.join(output, "genus_summary_output.csv")
+        if os.path.exists(genus_summary_path):
+            simplified_output_path = os.path.join(output, "simplified_genus_output.csv")
+            generate_simplified_genus_output(genus_summary_path, simplified_output_path)
 
 def run_auto_mode(input, output, model_paths, step_size=1000, batch_size=100, virus_threshold=0.5, genus_threshold=0.5):
     """
@@ -396,9 +613,48 @@ def run_auto_mode(input, output, model_paths, step_size=1000, batch_size=100, vi
         # Also save a copy of the original binary results
         shutil.copy(binary_results_path, os.path.join(output, "binary_results.csv"))
         
+        # Also copy the summarized binary results if they exist
+        binary_summarized_path = os.path.join(binary_output_dir, "binary_results_summarized.csv")
+        if os.path.exists(binary_summarized_path):
+            shutil.copy(binary_summarized_path, os.path.join(output, "binary_results_summarized.csv"))
+        
+        # Generate a simplified genus output from genus summary results
+        simplified_output_path = os.path.join(output, "simplified_genus_output.csv")
+        if os.path.exists(genus_summary_path):
+            generate_simplified_genus_output(genus_summary_path, simplified_output_path)
+        
+        # Also create a simplified output that only includes viral contigs with their genus
+        viral_contigs_df = binary_df[binary_df['virus'] >= virus_threshold].copy()
+        if not viral_contigs_df.empty:
+            viral_contigs_df = viral_contigs_df[['contig_name', 'virus', 'most_probable_taxon']]
+            viral_contigs_df.columns = ['contig_name', 'virus_probability', 'most_likely_genus']
+            viral_contigs_df['virus_probability'] = viral_contigs_df['virus_probability'].apply(lambda x: round(float(x) * 100, 2))
+            
+            # Add bacteriophage flag
+            viral_contigs_df['is_bacteriophage'] = viral_contigs_df['most_likely_genus'].apply(
+                lambda x: 'TRUE' if any(phage.lower() == str(x).lower() for phage in BACTERIOPHAGE_GENERA) else 'FALSE'
+            )
+            
+            viral_contigs_df.to_csv(os.path.join(output, "viral_contigs_genus.csv"), index=False)
+        
+        # Generate standardized combined output
+        combined_output_path = os.path.join(output, "combined_results.csv")
+        generate_combined_output(binary_results_path, genus_summary_path, combined_output_path, virus_threshold, include_std_dev=False)
+        
         # Copy other relevant files
         if os.path.exists(viral_fasta_path):
-            shutil.copy(viral_fasta_path, os.path.join(output, "viral_contigs.fasta"))
+            viral_output_path = os.path.join(output, "viral_contigs.fasta")
+            shutil.copy(viral_fasta_path, viral_output_path)
+            
+            # Update the viral contigs FASTA with genus information and virus probability
+            binary_summarized_path = os.path.join(binary_output_dir, "binary_results_summarized.csv")
+            if os.path.exists(genus_summary_path) and os.path.exists(binary_summarized_path):
+                update_fasta_with_genus(
+                    viral_output_path, 
+                    genus_summary_path, 
+                    binary_results_path=binary_summarized_path,
+                    output_path=viral_output_path
+                )
         
         non_viral_fasta_path = os.path.join(binary_output_dir, "non_viral_contigs.fasta")
         if os.path.exists(non_viral_fasta_path):
@@ -410,6 +666,136 @@ def run_auto_mode(input, output, model_paths, step_size=1000, batch_size=100, vi
         # Clean up temporary directories
         shutil.rmtree(temp_dir, ignore_errors=True)
 
+def update_fasta_with_genus(fasta_path, genus_summary_path, binary_results_path=None, output_path=None):
+    """
+    Update FASTA headers with genus information from genus summary and virus probability.
+    
+    Parameters:
+    -----------
+    fasta_path : str
+        Path to the FASTA file to update
+    genus_summary_path : str
+        Path to the genus summary CSV file
+    binary_results_path : str, optional
+        Path to the binary results CSV file for virus probability
+    output_path : str, optional
+        Path to save the updated FASTA file. If None, overwrites the input file.
+    """
+    if not os.path.exists(fasta_path) or not os.path.exists(genus_summary_path):
+        print(f"Warning: Could not update FASTA with genus information. Missing files.")
+        return False
+    
+    try:
+        # Read the genus summary CSV
+        try:
+            genus_df = pd.read_csv(genus_summary_path)
+        except Exception:
+            # Try with different CSV reading options if the default fails
+            genus_df = pd.read_csv(genus_summary_path, sep=None, engine='python')
+        
+        # Create a mapping of contig names to genus information
+        genus_info = {}
+        
+        # Determine which columns to use
+        genus_col = 'clean_taxon' if 'clean_taxon' in genus_df.columns else 'max_virus'
+        
+        if genus_col:
+            for _, row in genus_df.iterrows():
+                contig_name = row['contig_name']
+                # Handle possible different naming conventions
+                contig_id = contig_name.split()[0]
+                
+                # Get the genus name, removing 'mean_' prefix if present
+                genus = row[genus_col]
+                if isinstance(genus, str) and genus.startswith('mean_'):
+                    genus = genus[5:]
+                    
+                # Store both the full name and the ID for matching
+                genus_info[contig_name] = genus
+                genus_info[contig_id] = genus
+        
+        # Read virus probability information if available
+        virus_prob_info = {}
+        if binary_results_path and os.path.exists(binary_results_path):
+            try:
+                binary_df = pd.read_csv(binary_results_path)
+                
+                # Check if we have the summarized results with mean_is_virus
+                if 'mean_is_virus' in binary_df.columns:
+                    for _, row in binary_df.iterrows():
+                        contig_name = row['contig_name']
+                        contig_id = contig_name.split()[0]
+                        virus_prob = row['mean_is_virus']
+                        virus_prob_info[contig_name] = virus_prob
+                        virus_prob_info[contig_id] = virus_prob
+            except Exception as e:
+                print(f"Warning: Could not read virus probability information: {str(e)}")
+        
+        # If no output path specified, overwrite the input file
+        if output_path is None:
+            output_path = fasta_path
+        
+        # Read the FASTA file and update headers
+        records = []
+        for record in SeqIO.parse(fasta_path, "fasta"):
+            # Get the original ID and description
+            original_id = record.id
+            original_desc = record.description
+            
+            # Check if we have genus information for this contig
+            genus = None
+            if original_id in genus_info:
+                genus = genus_info[original_id]
+            elif original_desc in genus_info:
+                genus = genus_info[original_desc]
+            else:
+                # Try to match by the first part of the ID (before any spaces)
+                contig_id = original_id.split()[0]
+                if contig_id in genus_info:
+                    genus = genus_info[contig_id]
+            
+            # Check if we have virus probability information
+            virus_prob = None
+            if original_id in virus_prob_info:
+                virus_prob = virus_prob_info[original_id]
+            elif original_desc in virus_prob_info:
+                virus_prob = virus_prob_info[original_desc]
+            else:
+                contig_id = original_id.split()[0]
+                if contig_id in virus_prob_info:
+                    virus_prob = virus_prob_info[contig_id]
+            
+            # Build the new description
+            new_desc = original_desc
+            
+            # Add virus probability if available
+            if virus_prob is not None:
+                if " | " in new_desc:
+                    new_desc = f"{new_desc} | virus_prop={virus_prob:.4f}"
+                else:
+                    new_desc = f"{new_desc} | virus_prop={virus_prob:.4f}"
+            
+            # Add genus information if found
+            if genus:
+                if " | " in new_desc:
+                    new_desc = f"{new_desc} | predicted_genus={genus}"
+                else:
+                    new_desc = f"{new_desc} | predicted_genus={genus}"
+            
+            record.description = new_desc
+            records.append(record)
+        
+        # Write the updated FASTA file
+        with open(output_path, "w") as output_handle:
+            SeqIO.write(records, output_handle, "fasta")
+        
+        print(f"Updated FASTA headers with additional information: {output_path}")
+        return True
+    except Exception as e:
+        print(f"Error updating FASTA headers: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='VirusNet Tool')
@@ -423,9 +809,11 @@ if __name__ == "__main__":
     predict_parser.add_argument('--input', type=str, required=True)
     predict_parser.add_argument('--output', type=str, required=True)
     predict_parser.add_argument('--path', type=str, default=os.path.expanduser('~/.virusnet'))
-    predict_parser.add_argument('--step_size', type=int, default=1000, help='Step size for prediction')
+    predict_parser.add_argument('--step_size', type=int, default=1000, 
+                               help='Step size for prediction (Note: ignored in metagenome mode which uses one prediction per contig)')
     predict_parser.add_argument('--batch_size', type=int, default=100, help='Batch size for prediction')
-    predict_parser.add_argument('--mode', type=str, choices=['binary', 'genus'], default='binary', help='Prediction mode')
+    predict_parser.add_argument('--mode', type=str, choices=['binary', 'genus', 'both'], default='binary', 
+                               help='Prediction mode: binary (viral vs. non-viral), genus (taxonomic classification), or both (run binary first, then genus on viral contigs)')
     predict_parser.add_argument('--metagenome', action='store_true', help='Enable metagenome mode (only applicable for binary mode)')
     predict_parser.add_argument('--auto', action='store_true', 
                               help='Enable auto mode: First runs binary metagenome classification to identify viral contigs, '
@@ -446,13 +834,114 @@ if __name__ == "__main__":
         if check_files(args.path, args.verify):
             model_paths = {key: os.path.join(args.path, os.path.basename(info['url'])) for key, info in json.load(open(os.path.join(sys.prefix, 'bin', 'models.json'))).items()}
             
-            # Validate that auto mode is not used with incompatible arguments
-            if args.auto:
-                if args.mode != 'binary' or args.metagenome:
-                    print("Warning: When using --auto mode, the --mode and --metagenome arguments are ignored.")
-                    print("Auto mode will run binary metagenome prediction followed by genus prediction on viral contigs.")
+            # Check for mode conflicts
+            if args.auto and args.mode != 'binary':
+                print("Warning: When using --auto mode, the --mode argument is ignored.")
+                print("Auto mode will run binary metagenome prediction followed by genus prediction on viral contigs.")
                 
-                # Run in auto mode
+            if args.mode == 'both':
+                # Run binary first, then genus on viral contigs
+                print("Running in 'both' mode: binary classification followed by genus classification on viral contigs...")
+                
+                # Create temporary directory for binary output
+                temp_dir = tempfile_module.mkdtemp()
+                binary_output_dir = os.path.join(temp_dir, "binary_output")
+                os.makedirs(binary_output_dir, exist_ok=True)
+                os.makedirs(args.output, exist_ok=True)
+                
+                try:
+                    # Step 1: Run binary classification in metagenome mode
+                    print("Step 1: Running binary metagenome classification...")
+                    run_prediction(args.input, binary_output_dir, model_paths, args.step_size, args.batch_size, 
+                                 'binary', True, args.virus_threshold, args.genus_threshold)
+                    
+                    # Check for the viral contigs file
+                    viral_fasta_path = os.path.join(binary_output_dir, "viral_contigs.fasta")
+                    if not os.path.exists(viral_fasta_path) or os.path.getsize(viral_fasta_path) == 0:
+                        print("No viral contigs found or viral contigs file is empty. Skipping genus classification.")
+                        
+                        # Copy binary results to the output directory
+                        binary_results_path = os.path.join(binary_output_dir, "binary_results.csv")
+                        if os.path.exists(binary_results_path):
+                            shutil.copy(binary_results_path, os.path.join(args.output, "binary_results.csv"))
+                            
+                        # Also copy the summarized binary results if they exist
+                        binary_summarized_path = os.path.join(binary_output_dir, "binary_results_summarized.csv")
+                        if os.path.exists(binary_summarized_path):
+                            shutil.copy(binary_summarized_path, os.path.join(args.output, "binary_results_summarized.csv"))
+                            
+                        # Copy viral and non-viral fasta files if they exist
+                        for file_name in ["viral_contigs.fasta", "non_viral_contigs.fasta"]:
+                            source_path = os.path.join(binary_output_dir, file_name)
+                            if os.path.exists(source_path):
+                                dest_path = os.path.join(args.output, file_name)
+                                shutil.copy(source_path, dest_path)
+                                
+                                # Update viral contigs FASTA with genus information and virus probability
+                                if file_name == "viral_contigs.fasta":
+                                    genus_summary_path = os.path.join(args.output, "genus_summary_output.csv")
+                                    if os.path.exists(genus_summary_path) and os.path.exists(binary_summarized_path):
+                                        update_fasta_with_genus(
+                                            dest_path,
+                                            genus_summary_path,
+                                            binary_results_path=binary_summarized_path,
+                                            output_path=dest_path
+                                        )
+                    else:
+                        # Step 2: Run genus classification on viral contigs
+                        print("Step 2: Running genus classification on viral contigs...")
+                        run_prediction(viral_fasta_path, args.output, model_paths, args.step_size, args.batch_size, 
+                                     'genus', False, args.virus_threshold, args.genus_threshold)
+                        
+                        # Copy binary results to the output directory
+                        binary_results_path = os.path.join(binary_output_dir, "binary_results.csv")
+                        if os.path.exists(binary_results_path):
+                            shutil.copy(binary_results_path, os.path.join(args.output, "binary_results.csv"))
+                            
+                        # Also copy the summarized binary results if they exist
+                        binary_summarized_path = os.path.join(binary_output_dir, "binary_results_summarized.csv")
+                        if os.path.exists(binary_summarized_path):
+                            shutil.copy(binary_summarized_path, os.path.join(args.output, "binary_results_summarized.csv"))
+                            
+                        # Copy viral and non-viral fasta files if they exist
+                        for file_name in ["viral_contigs.fasta", "non_viral_contigs.fasta"]:
+                            source_path = os.path.join(binary_output_dir, file_name)
+                            if os.path.exists(source_path):
+                                dest_path = os.path.join(args.output, file_name)
+                                shutil.copy(source_path, dest_path)
+                                
+                                # Update viral contigs FASTA with genus information and virus probability
+                                if file_name == "viral_contigs.fasta":
+                                    genus_summary_path = os.path.join(args.output, "genus_summary_output.csv")
+                                    if os.path.exists(genus_summary_path) and os.path.exists(binary_summarized_path):
+                                        update_fasta_with_genus(
+                                            dest_path,
+                                            genus_summary_path,
+                                            binary_results_path=binary_summarized_path,
+                                            output_path=dest_path
+                                        )
+                        
+                        # Generate combined output with both binary and genus results
+                        genus_summary_path = os.path.join(args.output, "genus_summary_output.csv")
+                        if os.path.exists(binary_results_path):
+                            combined_output_path = os.path.join(args.output, "combined_results.csv")
+                            print("Generating combined output with binary and genus classification results...")
+                            generate_combined_output(
+                                binary_results_path, 
+                                genus_summary_path, 
+                                combined_output_path,
+                                args.virus_threshold,
+                                include_std_dev=False  # Exclude standard deviation in 'both' mode
+                            )
+                    
+                    print(f"'Both' mode completed. Results saved to {args.output}")
+                    
+                finally:
+                    # Clean up temporary directories
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    
+            # Run in auto mode
+            elif args.auto:
                 run_auto_mode(args.input, args.output, model_paths, args.step_size, args.batch_size, args.virus_threshold, args.genus_threshold)
             else:
                 # Run in regular mode

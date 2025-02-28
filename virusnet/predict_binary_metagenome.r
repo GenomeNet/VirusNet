@@ -68,6 +68,11 @@ if (is.null(command_args$virus_threshold)) {
   command_args$virus_threshold <- as.numeric(command_args$virus_threshold)
 }
 
+# Check if step_size is not the default value (1000) and warn that it's ignored in metagenome mode
+if (!is.null(command_args$step_size) && as.numeric(command_args$step_size) != 1000) {
+  custom_log("WARN", paste("Step size (", command_args$step_size, ") is ignored in metagenome mode. Metagenome mode always uses one prediction per contig."), "1/8")
+}
+
 # Check if the output directory exists, if not, create it
 output_directory <- command_args$output
 if (!dir.exists(output_directory)) {
@@ -159,6 +164,26 @@ print(head(prediction_df$contig_name))
 # Write CSV with strict formatting to ensure proper reading by pandas
 non_summarized_output_path <- file.path(output_directory, "binary_results.csv")
 write.csv(prediction_df, non_summarized_output_path, row.names = FALSE, quote = TRUE)
+
+# Generate summarized results with standard deviation
+# Group by contig_name and calculate statistics
+if (nrow(prediction_df) > 0) {
+  # For metagenome mode, we don't have multiple entries per contig
+  # Create a simplified summarized file with only relevant fields
+  contig_summary <- prediction_df %>%
+    mutate(
+      virus_probability = virus,
+      is_virus = virus >= virus_threshold
+    ) %>%
+    select(contig_name, virus_probability, is_virus)
+  
+  # Write summarized results
+  summarized_output_path <- file.path(output_directory, "binary_results_summarized.csv")
+  write.csv(contig_summary, summarized_output_path, row.names = FALSE, quote = TRUE)
+  
+  custom_log("INFO", paste("Summarized results written to:", summarized_output_path), "3/8")
+  custom_log("INFO", "Note: Metagenome mode uses one prediction per contig, so no standard deviation is calculated", "3/8")
+}
 
 # Print the first few rows of the CSV to verify format
 cat("Verifying CSV output format:\n")
