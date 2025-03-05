@@ -222,9 +222,9 @@ main <- function() {
   model_binary <- "~/.virusnet/transfer_learning_virus_bert_5_85.h5"
   model_genus_path <- "~/.virusnet/virus_genus_2023-01-23.hdf5"
   genus_labels_path <- "~/.virusnet/genus_labels.rds"
-  output_csv <- "output_merged_mult"
+  output_csv <- "output_merged_mult2"
   window_size <- 1000
-  step <- 5000
+  step <- 10000
   num_gpus <- 2  # Adjust based on available GPUs
   
   # Create output directory
