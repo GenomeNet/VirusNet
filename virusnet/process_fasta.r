@@ -14,7 +14,12 @@ suppressWarnings(suppressPackageStartupMessages({
   library(reticulate)
 }))
 
-source("utils.r")
+reticulate::py_run_string("import warnings")
+reticulate::py_run_string("warnings.filterwarnings('ignore', category=UserWarning, module='h5py')")
+
+conda_prefix <- Sys.getenv("CONDA_PREFIX")
+
+invisible(source(file.path(conda_prefix, "bin", "utils.r")))
 
 # Define custom objects for the model (adjust as needed for your model)
 custom_objects <- list(
@@ -134,6 +139,8 @@ process_fasta <- function(fasta_file, model, model_genus, genus_labels, output_c
       contig_length = contig_length
     )
   }
+  
+
   
   # Combine results into a data frame
   summary_df <- bind_rows(summary_list)
@@ -287,3 +294,5 @@ summary_df <- data.frame(
 write.table(summary_df, summary_csv_file, sep = ";", row.names = FALSE, col.names = TRUE, quote = FALSE)
 
 log_info(paste("Processing complete for", opt$fasta_file))
+
+# Rscript process_fasta.R --fasta_file file.fasta --output_dir output_folder --model_binary path/to/model_binary.h5 --model_genus path/to/model_genus.hdf5 --genus_labels path/to/genus_labels.rds

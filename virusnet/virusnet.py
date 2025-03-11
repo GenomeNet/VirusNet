@@ -5,6 +5,10 @@ import subprocess
 import multiprocessing
 import argparse
 import pandas as pd
+import warnings
+
+# Suppress h5py UserWarning
+warnings.filterwarnings("ignore", category=UserWarning, module="h5py")
 
 # Hardcoded R script path (assumes process_fasta.r is in the same directory as this script)
 R_SCRIPT_PATH = "./process_fasta.r"
@@ -64,7 +68,7 @@ def run_r_script(file, gpu_id, output_dir, model_binary, model_genus, genus_labe
         print(f"Completed processing {file}" + (f" on GPU {gpu_id}" if gpu_id is not None else " on CPU"))
     except subprocess.CalledProcessError as e:
         print(f"Error processing {file}" + (f" on GPU {gpu_id}" if gpu_id is not None else " on CPU") + f": {e}")
-        
+
 def download_models(download_path, verify=False):
     """
     Placeholder for downloading model files.
