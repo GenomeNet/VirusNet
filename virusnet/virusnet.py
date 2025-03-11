@@ -26,13 +26,30 @@ def check_files(model_binary, model_genus, genus_labels):
 
 def run_r_script(file, gpu_id, output_dir, model_binary, model_genus, genus_labels, window_size, step):
     """
-    Run the R script to process a FASTA file, optionally assigning a GPU.
+    Run the R script for a single FASTA file on the specified GPU or CPU.
+
+    Args:
+        file (str): Path to the FASTA file.
+        gpu_id (int or None): GPU index to use (e.g., 0 for GPU0), or None for CPU.
+        output_dir (str): Output directory for results.
+        model_binary (str): Path to the binary model.
+        model_genus (str): Path to the genus model.
+        genus_labels (str): Path to the genus labels RDS file.
+        window_size (int): Window size for processing.
+        step (int): Step size for processing.
     """
+    # Copy the current environment
     env = os.environ.copy()
+
+    # Set CUDA_VISIBLE_DEVICES based on gpu_id
     if gpu_id is not None:
-        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)  # Use specified GPU
+    else:
+        env["CUDA_VISIBLE_DEVICES"] = ""  # Hide all GPUs to force CPU usage
+
+    # Command to run the R script
     cmd = [
-        "Rscript", R_SCRIPT_PATH,
+        "Rscript", "./process_fasta.r",
         "--fasta_file", file,
         "--output_dir", output_dir,
         "--model_binary", model_binary,
@@ -41,12 +58,13 @@ def run_r_script(file, gpu_id, output_dir, model_binary, model_genus, genus_labe
         "--window_size", str(window_size),
         "--step", str(step)
     ]
+    
     try:
         subprocess.run(cmd, check=True, env=env)
         print(f"Completed processing {file}" + (f" on GPU {gpu_id}" if gpu_id is not None else " on CPU"))
     except subprocess.CalledProcessError as e:
         print(f"Error processing {file}" + (f" on GPU {gpu_id}" if gpu_id is not None else " on CPU") + f": {e}")
-
+        
 def download_models(download_path, verify=False):
     """
     Placeholder for downloading model files.
