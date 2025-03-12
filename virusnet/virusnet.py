@@ -2,11 +2,14 @@
 
 import os
 import subprocess
-import multiprocessing
+import multiprocessing as mp
 import argparse
 import pandas as pd
 import warnings
-import time  # Added for timing
+import time
+import logging
+import queue
+import threading
 
 # Suppress h5py UserWarning
 warnings.filterwarnings("ignore", category=UserWarning, module="h5py")
@@ -29,16 +32,30 @@ def check_files(model_binary, model_genus, genus_labels):
             "Please ensure they exist or run 'virusnet download' to fetch them."
         )
 
+def init_worker():
+    """
+    Initialize logging for each worker process with a simpler format.
+    """
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
+
 def run_r_script(file, gpu_id, output_dir, model_binary, model_genus, genus_labels, window_size, step, binary_batch_size, genus_batch_size):
-    """
-    Run the R script for a single FASTA file on the specified GPU or CPU.
-    """
+    # Get base filename for cleaner logs
+    base_filename = os.path.basename(file)
+    pid = os.getpid()
+    
+    # Set up the environment for this process
     env = os.environ.copy()
     if gpu_id is not None:
-        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)  # Use specified GPU
+        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        device = f"GPU {gpu_id}"
     else:
-        env["CUDA_VISIBLE_DEVICES"] = ""  # Hide all GPUs to force CPU usage
-
+        env["CUDA_VISIBLE_DEVICES"] = ""
+        device = "CPU"
+    
+    # Simplified logging - just the essential information
+    logging.info(f"Started processing {base_filename} on {device}")
+    
+    # Command to run the R script
     cmd = [
         "Rscript", R_SCRIPT_PATH,
         "--fasta_file", file,
@@ -54,16 +71,46 @@ def run_r_script(file, gpu_id, output_dir, model_binary, model_genus, genus_labe
     
     try:
         subprocess.run(cmd, check=True, env=env)
-        print(f"Completed processing {file}" + (f" on GPU {gpu_id}" if gpu_id is not None else " on CPU"))
+        logging.info(f"Completed processing {base_filename} on {device}")
     except subprocess.CalledProcessError as e:
-        print(f"Error processing {file}" + (f" on GPU {gpu_id}" if gpu_id is not None else " on CPU") + f": {e}")
+        logging.error(f"Error processing {base_filename} on {device}: {e}")
 
 def download_models(download_path, verify=False):
     """
     Placeholder for downloading model files.
     """
     os.makedirs(download_path, exist_ok=True)
-    print(f"Downloading models to {download_path} with verify={verify}")
+    logging.info(f"Downloading models to {download_path} with verify={verify}")
+
+def gpu_worker(gpu_id, task_queue, output_dir, model_binary, model_genus, genus_labels, window_size, step, binary_batch_size, genus_batch_size):
+    """
+    Worker function that processes tasks for a specific GPU.
+    Pulls tasks from the queue until it receives None (indicating no more tasks).
+    """
+    logging.info(f"GPU {gpu_id} worker started")
+    while True:
+        file = task_queue.get()
+        if file is None:  # Sentinel value to indicate end of queue
+            task_queue.task_done()
+            break
+            
+        run_r_script(file, gpu_id, output_dir, model_binary, model_genus, genus_labels, 
+                     window_size, step, binary_batch_size, genus_batch_size)
+        task_queue.task_done()
+
+def cpu_worker_pool(fasta_files, num_cpu_processes, output_dir, model_binary, model_genus, genus_labels, window_size, step, binary_batch_size, genus_batch_size):
+    """
+    Process files using CPU workers in a pool.
+    """
+    logging.info(f"Starting processing with {num_cpu_processes} CPU processes")
+    tasks = [
+        (file, None, output_dir, model_binary, model_genus, genus_labels, 
+         window_size, step, binary_batch_size, genus_batch_size)
+        for file in fasta_files
+    ]
+    
+    with mp.get_context("spawn").Pool(processes=num_cpu_processes, initializer=init_worker) as pool:
+        pool.starmap(run_r_script, tasks)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="VirusNet Tool")
@@ -130,8 +177,8 @@ if __name__ == "__main__":
     predict_parser.add_argument(
         "--binary_batch_size", 
         type=int, 
-        default=100, 
-        help="Batch size for binary prediction (default: 10)"
+        default=1, 
+        help="Batch size for binary prediction (default: 1)"
     )
     predict_parser.add_argument(
         "--genus_batch_size", 
@@ -154,6 +201,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Set up logging for the main process
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
+
     if args.command == "download":
         download_models(args.path, args.verify)
 
@@ -172,29 +222,51 @@ if __name__ == "__main__":
         ]
         if not fasta_files:
             raise ValueError(f"No FASTA files found in {args.input_folder}")
-        print(f"Found {len(fasta_files)} FASTA files to process.")
+        logging.info(f"Found {len(fasta_files)} FASTA files to process.")
 
         # Record the start time
         start_time = time.time()
 
-        # Set up parallel processing based on GPU or CPU
-        num_processes = args.num_gpus if args.num_gpus > 0 else args.num_cpu_processes
-        use_gpu = args.num_gpus > 0
+        # Use GPU or CPU processing
+        if args.num_gpus > 0:
+            # Create a task queue for each GPU
+            gpu_queues = [queue.Queue() for _ in range(args.num_gpus)]
+            
+            # Distribute files among GPU queues (round-robin)
+            for i, file in enumerate(fasta_files):
+                gpu_id = i % args.num_gpus
+                gpu_queues[gpu_id].put(file)
+            
+            # Add sentinel values to signal the end of tasks
+            for q in gpu_queues:
+                q.put(None)
+            
+            # Create and start a worker thread for each GPU
+            threads = []
+            for gpu_id, task_queue in enumerate(gpu_queues):
+                worker_thread = threading.Thread(
+                    target=gpu_worker,
+                    args=(gpu_id, task_queue, args.output_dir, args.model_binary, 
+                          args.model_genus, args.genus_labels, args.window_size, 
+                          args.step, args.binary_batch_size, args.genus_batch_size)
+                )
+                worker_thread.start()
+                threads.append(worker_thread)
+            
+            # Wait for all worker threads to complete
+            for thread in threads:
+                thread.join()
+                
+            logging.info("All GPU processing completed")
+        else:
+            # Use CPU processing with a pool
+            cpu_worker_pool(
+                fasta_files, args.num_cpu_processes, args.output_dir, args.model_binary,
+                args.model_genus, args.genus_labels, args.window_size, args.step,
+                args.binary_batch_size, args.genus_batch_size
+            )
 
-        with multiprocessing.Pool(processes=num_processes) as pool:
-            if use_gpu:
-                tasks = [
-                    (file, i % args.num_gpus, args.output_dir, args.model_binary, 
-                     args.model_genus, args.genus_labels, args.window_size, args.step, args.binary_batch_size, args.genus_batch_size)
-                    for i, file in enumerate(fasta_files)
-                ]
-            else:
-                tasks = [
-                    (file, None, args.output_dir, args.model_binary, 
-                     args.model_genus, args.genus_labels, args.window_size, args.step, args.binary_batch_size, args.genus_batch_size)
-                    for file in fasta_files
-                ]
-            pool.starmap(run_r_script, tasks)
+        logging.info("All files have been processed")
 
         # Combine summary CSV files
         summary_files = [
@@ -206,9 +278,9 @@ if __name__ == "__main__":
             combined_summary = pd.concat(summary_dfs, ignore_index=True)
             combined_path = os.path.join(args.output_dir, "combined_summary.csv")
             combined_summary.to_csv(combined_path, sep=";", index=False)
-            print(f"Combined summary saved to {combined_path}")
+            logging.info(f"Combined summary saved to {combined_path}")
         else:
-            print("No summary files generated.")
+            logging.warning("No summary files generated.")
 
         # Calculate and display the total processing time
         end_time = time.time()
@@ -216,4 +288,4 @@ if __name__ == "__main__":
         hours = int(total_time // 3600)
         minutes = int((total_time % 3600) // 60)
         seconds = int(total_time % 60)
-        print(f"Total processing time: {hours} hours, {minutes} minutes, and {seconds} seconds.")
+        logging.info(f"Total processing time: {hours} hours, {minutes} minutes, and {seconds} seconds.")
