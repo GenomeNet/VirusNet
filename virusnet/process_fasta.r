@@ -35,7 +35,7 @@ log_info <- function(message) {
 }
 
 # Function to process a single FASTA file
-process_fasta <- function(fasta_file, model, model_genus, genus_labels, output_csv, window_size, step) {
+process_fasta <- function(fasta_file, model, model_genus, genus_labels, output_csv, window_size, step, binary_batch_size, genus_batch_size) {
   library(dplyr)
   
   # Read all contigs from the FASTA file
@@ -65,7 +65,7 @@ process_fasta <- function(fasta_file, model, model_genus, genus_labels, output_c
     layer_name = "dense_26",
     path_input = fasta_file,
     step = step,
-    batch_size = 1,
+    batch_size = binary_batch_size,
     verbose = FALSE,
     padding = "self",
     mode = "label",
@@ -166,7 +166,7 @@ process_fasta <- function(fasta_file, model, model_genus, genus_labels, output_c
       layer_name = "dense_3",
       path_input = viral_fasta_file,
       step = 500,
-      batch_size = 10,
+      batch_size = genus_batch_size,
       verbose = FALSE,
       padding = "self",
       mode = "label",
@@ -257,7 +257,9 @@ option_list <- list(
   make_option(c("-g", "--model_genus"), type = "character", default = NULL, help = "Genus model path", metavar = "character"),
   make_option(c("-l", "--genus_labels"), type = "character", default = NULL, help = "Genus labels RDS path", metavar = "character"),
   make_option(c("-w", "--window_size"), type = "integer", default = 1000, help = "Window size [default=1000]", metavar = "integer"),
-  make_option(c("-s", "--step"), type = "integer", default = 5000, help = "Step size [default=5000]", metavar = "integer")
+  make_option(c("-s", "--step"), type = "integer", default = 5000, help = "Step size [default=5000]", metavar = "integer"),
+  make_option(c("--binary_batch_size"), type = "integer", default = 10, help = "Batch size for binary prediction [default=1]", metavar = "integer"),
+  make_option(c("--genus_batch_size"), type = "integer", default = 10, help = "Batch size for genus prediction [default=10]", metavar = "integer")
 )
 
 opt_parser <- OptionParser(option_list = option_list)
@@ -278,7 +280,7 @@ model_genus <- keras::load_model_hdf5(opt$model_genus, compile = FALSE)
 genus_labels <- readRDS(opt$genus_labels)
 
 # Process the single FASTA file
-summary_stats <- process_fasta(opt$fasta_file, model, model_genus, genus_labels, opt$output_dir, opt$window_size, opt$step)
+summary_stats <- process_fasta(opt$fasta_file, model, model_genus, genus_labels, opt$output_dir, opt$window_size, opt$step, opt$binary_batch_size, opt$genus_batch_size)
 
 # Write summary to a separate CSV file
 base_name <- tools::file_path_sans_ext(basename(opt$fasta_file))

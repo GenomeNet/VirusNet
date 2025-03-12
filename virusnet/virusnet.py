@@ -6,12 +6,13 @@ import multiprocessing
 import argparse
 import pandas as pd
 import warnings
+import time  # Added for timing
 
 # Suppress h5py UserWarning
 warnings.filterwarnings("ignore", category=UserWarning, module="h5py")
 
-# Hardcoded R script path (assumes process_fasta.r is in the same directory as this script)
-R_SCRIPT_PATH = "./process_fasta.r"
+# Use a relative path based on the location of this script
+R_SCRIPT_PATH = os.path.join(os.path.dirname(__file__), "process_fasta.r")
 
 def check_files(model_binary, model_genus, genus_labels):
     """
@@ -28,39 +29,27 @@ def check_files(model_binary, model_genus, genus_labels):
             "Please ensure they exist or run 'virusnet download' to fetch them."
         )
 
-def run_r_script(file, gpu_id, output_dir, model_binary, model_genus, genus_labels, window_size, step):
+def run_r_script(file, gpu_id, output_dir, model_binary, model_genus, genus_labels, window_size, step, binary_batch_size, genus_batch_size):
     """
     Run the R script for a single FASTA file on the specified GPU or CPU.
-
-    Args:
-        file (str): Path to the FASTA file.
-        gpu_id (int or None): GPU index to use (e.g., 0 for GPU0), or None for CPU.
-        output_dir (str): Output directory for results.
-        model_binary (str): Path to the binary model.
-        model_genus (str): Path to the genus model.
-        genus_labels (str): Path to the genus labels RDS file.
-        window_size (int): Window size for processing.
-        step (int): Step size for processing.
     """
-    # Copy the current environment
     env = os.environ.copy()
-
-    # Set CUDA_VISIBLE_DEVICES based on gpu_id
     if gpu_id is not None:
         env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)  # Use specified GPU
     else:
         env["CUDA_VISIBLE_DEVICES"] = ""  # Hide all GPUs to force CPU usage
 
-    # Command to run the R script
     cmd = [
-        "Rscript", "./process_fasta.r",
+        "Rscript", R_SCRIPT_PATH,
         "--fasta_file", file,
         "--output_dir", output_dir,
         "--model_binary", model_binary,
         "--model_genus", model_genus,
         "--genus_labels", genus_labels,
         "--window_size", str(window_size),
-        "--step", str(step)
+        "--step", str(step),
+        "--binary_batch_size", str(binary_batch_size),
+        "--genus_batch_size", str(genus_batch_size)
     ]
     
     try:
@@ -72,12 +61,9 @@ def run_r_script(file, gpu_id, output_dir, model_binary, model_genus, genus_labe
 def download_models(download_path, verify=False):
     """
     Placeholder for downloading model files.
-    In a full implementation, this would download models to the specified path and verify hashes if requested.
     """
-    # For this example, it’s a placeholder. Replace with actual download logic if available.
     os.makedirs(download_path, exist_ok=True)
     print(f"Downloading models to {download_path} with verify={verify}")
-    # Example: Add actual urllib.request.urlretrieve calls and hash verification here
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="VirusNet Tool")
@@ -142,6 +128,18 @@ if __name__ == "__main__":
         help="Step size for processing"
     )
     predict_parser.add_argument(
+        "--binary_batch_size", 
+        type=int, 
+        default=100, 
+        help="Batch size for binary prediction (default: 10)"
+    )
+    predict_parser.add_argument(
+        "--genus_batch_size", 
+        type=int, 
+        default=10, 
+        help="Batch size for genus prediction (default: 10)"
+    )
+    predict_parser.add_argument(
         "--num_gpus", 
         type=int, 
         default=0, 
@@ -176,6 +174,9 @@ if __name__ == "__main__":
             raise ValueError(f"No FASTA files found in {args.input_folder}")
         print(f"Found {len(fasta_files)} FASTA files to process.")
 
+        # Record the start time
+        start_time = time.time()
+
         # Set up parallel processing based on GPU or CPU
         num_processes = args.num_gpus if args.num_gpus > 0 else args.num_cpu_processes
         use_gpu = args.num_gpus > 0
@@ -184,13 +185,13 @@ if __name__ == "__main__":
             if use_gpu:
                 tasks = [
                     (file, i % args.num_gpus, args.output_dir, args.model_binary, 
-                     args.model_genus, args.genus_labels, args.window_size, args.step)
+                     args.model_genus, args.genus_labels, args.window_size, args.step, args.binary_batch_size, args.genus_batch_size)
                     for i, file in enumerate(fasta_files)
                 ]
             else:
                 tasks = [
                     (file, None, args.output_dir, args.model_binary, 
-                     args.model_genus, args.genus_labels, args.window_size, args.step)
+                     args.model_genus, args.genus_labels, args.window_size, args.step, args.binary_batch_size, args.genus_batch_size)
                     for file in fasta_files
                 ]
             pool.starmap(run_r_script, tasks)
@@ -208,3 +209,11 @@ if __name__ == "__main__":
             print(f"Combined summary saved to {combined_path}")
         else:
             print("No summary files generated.")
+
+        # Calculate and display the total processing time
+        end_time = time.time()
+        total_time = end_time - start_time
+        hours = int(total_time // 3600)
+        minutes = int((total_time % 3600) // 60)
+        seconds = int(total_time % 60)
+        print(f"Total processing time: {hours} hours, {minutes} minutes, and {seconds} seconds.")

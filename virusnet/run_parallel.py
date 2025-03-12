@@ -43,14 +43,14 @@ def run_r_script(file, gpu_id, r_script_path, output_dir, model_binary, model_ge
 
 def main():
     # Configuration (adjust these to match your setup)
-    input_folder = "../test"  # Directory with FASTA files
+    input_folder = "test_data"  # Directory with FASTA files
     output_dir = "output_folder_3"               # Directory for output files
     r_script_path = "./process_fasta.r"        # Path to your R script
     model_binary = "~/.virusnet/transfer_learning_virus_bert_5_85.h5"   # Binary model path
     model_genus = "~/.virusnet/virus_genus_2023-01-23.hdf5"   # Genus model path
     genus_labels = "~/.virusnet/genus_labels.rds"  # Genus labels path
     window_size = 1000                         # Window size
-    step = 5000                                # Step size
+    step = 10000                                # Step size
     num_gpus = 2                               # Number of GPUs available (e.g., 2 for GPU0 and GPU1)
 
     # Create output directory if it doesn’t exist
