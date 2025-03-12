@@ -38,9 +38,16 @@ log_info <- function(message) {
 process_fasta <- function(fasta_file, model, model_genus, genus_labels, output_csv, window_size, step, binary_batch_size, genus_batch_size) {
   library(dplyr)
   
+  # Get base filename for cleaner logs
+  base_name <- tools::file_path_sans_ext(basename(fasta_file))
+  log_info(paste("Started processing", base_name))
+  
   # Read all contigs from the FASTA file
   fasta_data_all <- readFasta(fasta_file)
-  if (nrow(fasta_data_all) == 0) stop("FASTA file is empty.")
+  if (nrow(fasta_data_all) == 0) {
+    warning("FASTA file is empty:", fasta_file)
+    return(NULL)
+  }
   
   # Add an index column to track original positions
   fasta_data_all$index <- seq_len(nrow(fasta_data_all))
@@ -51,7 +58,6 @@ process_fasta <- function(fasta_file, model, model_genus, genus_labels, output_c
   fasta_data <- fasta_data_all %>% filter(Length >= window_size)
   
   # Define output CSV file path
-  base_name <- tools::file_path_sans_ext(basename(fasta_file))
   csv_file <- file.path(output_csv, paste0(base_name, ".csv"))
   
   # Create a temporary directory for binary prediction H5 files
@@ -139,8 +145,6 @@ process_fasta <- function(fasta_file, model, model_genus, genus_labels, output_c
       contig_length = contig_length
     )
   }
-  
-
   
   # Combine results into a data frame
   summary_df <- bind_rows(summary_list)
@@ -236,7 +240,7 @@ process_fasta <- function(fasta_file, model, model_genus, genus_labels, output_c
   # Delete temporary binary H5 files
   unlink(temp_output_dir, recursive = TRUE)
   
-  message("Processed:", fasta_file)
+  log_info(paste("Completed processing", base_name))
   
   # Return summary stats for the whole file
   return(list(
@@ -249,16 +253,63 @@ process_fasta <- function(fasta_file, model, model_genus, genus_labels, output_c
   ))
 }
 
+# Process multiple files with a single model load
+process_batch <- function(fasta_files, output_dir, model_binary, model_genus, genus_labels, window_size, step, binary_batch_size, genus_batch_size) {
+  # Load models only once
+  log_info("Loading models...")
+  model <- keras::load_model_hdf5(model_binary, custom_objects = custom_objects)
+  model_genus <- keras::load_model_hdf5(model_genus, compile = FALSE)
+  genus_labels <- readRDS(genus_labels)
+  log_info("Models loaded successfully")
+  
+  # Process each file sequentially with the same model instances
+  summary_stats_list <- list()
+  for (i in seq_along(fasta_files)) {
+    fasta_file <- fasta_files[i]
+    # Process file and collect summary stats
+    summary_stats <- process_fasta(
+      fasta_file, model, model_genus, genus_labels, 
+      output_dir, window_size, step, binary_batch_size, genus_batch_size
+    )
+    
+    if (!is.null(summary_stats)) {
+      # Write individual summary file
+      base_name <- tools::file_path_sans_ext(basename(fasta_file))
+      summary_csv_file <- file.path(output_dir, paste0(base_name, "_summary.csv"))
+      summary_df <- data.frame(
+        file_name = summary_stats$file_name,
+        virus_percentage = summary_stats$virus_percentage,
+        non_virus_percentage = summary_stats$non_virus_percentage,
+        viral_nt = summary_stats$viral_nt,
+        non_viral_nt = summary_stats$non_viral_nt,
+        unique_genera = summary_stats$unique_genera
+      )
+      write.table(summary_df, summary_csv_file, sep = ";", row.names = FALSE, col.names = TRUE, quote = FALSE)
+      
+      # Add to list for combined summary
+      summary_stats_list[[i]] <- summary_df
+    }
+  }
+  
+  # Return all processed summaries
+  if (length(summary_stats_list) > 0) {
+    return(bind_rows(summary_stats_list))
+  } else {
+    return(NULL)
+  }
+}
+
 # Parse command-line arguments
 option_list <- list(
-  make_option(c("-f", "--fasta_file"), type = "character", default = NULL, help = "Input FASTA file", metavar = "character"),
+  make_option(c("-f", "--fasta_file"), type = "character", default = NULL, help = "Input FASTA file (single file mode)", metavar = "character"),
+  make_option(c("--fasta_list"), type = "character", default = NULL, help = "File containing list of FASTA files to process (batch mode)", metavar = "character"),
   make_option(c("-o", "--output_dir"), type = "character", default = NULL, help = "Output directory", metavar = "character"),
   make_option(c("-b", "--model_binary"), type = "character", default = NULL, help = "Binary model path", metavar = "character"),
   make_option(c("-g", "--model_genus"), type = "character", default = NULL, help = "Genus model path", metavar = "character"),
-  make_option(c("-l", "--genus_labels"), type = "character", default = NULL, help = "Genus labels RDS path", metavar = "character"),
+  make_option(c("--genus_labels"), type = "character", default = NULL, help = "Genus labels RDS path", metavar = "character"),
   make_option(c("-w", "--window_size"), type = "integer", default = 1000, help = "Window size [default=1000]", metavar = "integer"),
   make_option(c("-s", "--step"), type = "integer", default = 5000, help = "Step size [default=5000]", metavar = "integer"),
-  make_option(c("--binary_batch_size"), type = "integer", default = 10, help = "Batch size for binary prediction [default=1]", metavar = "integer"),
+  make_option(c("--binary_batch_size"), type = "integer", default = 1, help = "Batch size for binary prediction [default=1]", metavar = "integer"),
   make_option(c("--genus_batch_size"), type = "integer", default = 10, help = "Batch size for genus prediction [default=10]", metavar = "integer")
 )
 
@@ -266,7 +317,8 @@ opt_parser <- OptionParser(option_list = option_list)
 opt <- parse_args(opt_parser)
 
 # Check for required arguments
-if (is.null(opt$fasta_file) || is.null(opt$output_dir) || is.null(opt$model_binary) || 
+if ((is.null(opt$fasta_file) && is.null(opt$fasta_list)) || 
+    is.null(opt$output_dir) || is.null(opt$model_binary) || 
     is.null(opt$model_genus) || is.null(opt$genus_labels)) {
   stop("Missing required arguments. Use --help for usage information.")
 }
@@ -274,27 +326,53 @@ if (is.null(opt$fasta_file) || is.null(opt$output_dir) || is.null(opt$model_bina
 # Create output directory if it doesn't exist
 dir.create(opt$output_dir, showWarnings = FALSE, recursive = TRUE)
 
-# Load models and labels
-model <- keras::load_model_hdf5(opt$model_binary, custom_objects = custom_objects)
-model_genus <- keras::load_model_hdf5(opt$model_genus, compile = FALSE)
-genus_labels <- readRDS(opt$genus_labels)
+# Determine mode: single file or batch mode
+if (!is.null(opt$fasta_file)) {
+  # Single file mode
+  log_info(paste("Processing single file:", opt$fasta_file))
+  # Load models and labels
+  model <- keras::load_model_hdf5(opt$model_binary, custom_objects = custom_objects)
+  model_genus <- keras::load_model_hdf5(opt$model_genus, compile = FALSE)
+  genus_labels <- readRDS(opt$genus_labels)
+  
+  # Process the single FASTA file
+  summary_stats <- process_fasta(
+    opt$fasta_file, model, model_genus, genus_labels, 
+    opt$output_dir, opt$window_size, opt$step, 
+    opt$binary_batch_size, opt$genus_batch_size
+  )
+  
+  if (!is.null(summary_stats)) {
+    # Write summary to a separate CSV file
+    base_name <- tools::file_path_sans_ext(basename(opt$fasta_file))
+    summary_csv_file <- file.path(opt$output_dir, paste0(base_name, "_summary.csv"))
+    summary_df <- data.frame(
+      file_name = summary_stats$file_name,
+      virus_percentage = summary_stats$virus_percentage,
+      non_virus_percentage = summary_stats$non_virus_percentage,
+      viral_nt = summary_stats$viral_nt,
+      non_viral_nt = summary_stats$non_viral_nt,
+      unique_genera = summary_stats$unique_genera
+    )
+    write.table(summary_df, summary_csv_file, sep = ";", row.names = FALSE, col.names = TRUE, quote = FALSE)
+  }
+  
+} else {
+  # Batch mode - process multiple files with one model load
+  log_info(paste("Processing batch from file list:", opt$fasta_list))
+  
+  # Read the list of FASTA files
+  fasta_files <- readLines(opt$fasta_list)
+  log_info(paste("Found", length(fasta_files), "files to process"))
+  
+  # Process all files with one model load
+  process_batch(
+    fasta_files, opt$output_dir, opt$model_binary, 
+    opt$model_genus, opt$genus_labels, opt$window_size, 
+    opt$step, opt$binary_batch_size, opt$genus_batch_size
+  )
+}
 
-# Process the single FASTA file
-summary_stats <- process_fasta(opt$fasta_file, model, model_genus, genus_labels, opt$output_dir, opt$window_size, opt$step, opt$binary_batch_size, opt$genus_batch_size)
-
-# Write summary to a separate CSV file
-base_name <- tools::file_path_sans_ext(basename(opt$fasta_file))
-summary_csv_file <- file.path(opt$output_dir, paste0(base_name, "_summary.csv"))
-summary_df <- data.frame(
-  file_name = summary_stats$file_name,
-  virus_percentage = summary_stats$virus_percentage,
-  non_virus_percentage = summary_stats$non_virus_percentage,
-  viral_nt = summary_stats$viral_nt,
-  non_viral_nt = summary_stats$non_viral_nt,
-  unique_genera = summary_stats$unique_genera
-)
-write.table(summary_df, summary_csv_file, sep = ";", row.names = FALSE, col.names = TRUE, quote = FALSE)
-
-log_info(paste("Processing complete for", opt$fasta_file))
+log_info("All processing complete")
 
 # Rscript process_fasta.R --fasta_file file.fasta --output_dir output_folder --model_binary path/to/model_binary.h5 --model_genus path/to/model_genus.hdf5 --genus_labels path/to/genus_labels.rds

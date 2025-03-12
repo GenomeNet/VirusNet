@@ -10,6 +10,7 @@ import time
 import logging
 import queue
 import threading
+import tempfile
 
 # Suppress h5py UserWarning
 warnings.filterwarnings("ignore", category=UserWarning, module="h5py")
@@ -38,27 +39,29 @@ def init_worker():
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s')
 
-def run_r_script(file, gpu_id, output_dir, model_binary, model_genus, genus_labels, window_size, step, binary_batch_size, genus_batch_size):
-    # Get base filename for cleaner logs
-    base_filename = os.path.basename(file)
-    pid = os.getpid()
+def run_batch_r_script(gpu_id, fasta_list_file, output_dir, model_binary, model_genus, genus_labels, window_size, step, binary_batch_size, genus_batch_size):
+    """
+    Run the R script in batch mode for multiple files with a single model load.
+    
+    Args:
+        gpu_id: GPU ID to use (set to None for CPU)
+        fasta_list_file: Path to file containing list of FASTA files
+        Other args are passed to the R script
+    """
+    device_type = f"GPU {gpu_id}" if gpu_id is not None else "CPU"
+    logging.info(f"Started batch processing on {device_type}")
     
     # Set up the environment for this process
     env = os.environ.copy()
     if gpu_id is not None:
         env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-        device = f"GPU {gpu_id}"
     else:
         env["CUDA_VISIBLE_DEVICES"] = ""
-        device = "CPU"
     
-    # Simplified logging - just the essential information
-    logging.info(f"Started processing {base_filename} on {device}")
-    
-    # Command to run the R script
+    # Command to run the R script in batch mode
     cmd = [
         "Rscript", R_SCRIPT_PATH,
-        "--fasta_file", file,
+        "--fasta_list", fasta_list_file,
         "--output_dir", output_dir,
         "--model_binary", model_binary,
         "--model_genus", model_genus,
@@ -71,9 +74,9 @@ def run_r_script(file, gpu_id, output_dir, model_binary, model_genus, genus_labe
     
     try:
         subprocess.run(cmd, check=True, env=env)
-        logging.info(f"Completed processing {base_filename} on {device}")
+        logging.info(f"Completed batch processing on {device_type}")
     except subprocess.CalledProcessError as e:
-        logging.error(f"Error processing {base_filename} on {device}: {e}")
+        logging.error(f"Error in batch processing on {device_type}: {e}")
 
 def download_models(download_path, verify=False):
     """
@@ -81,36 +84,6 @@ def download_models(download_path, verify=False):
     """
     os.makedirs(download_path, exist_ok=True)
     logging.info(f"Downloading models to {download_path} with verify={verify}")
-
-def gpu_worker(gpu_id, task_queue, output_dir, model_binary, model_genus, genus_labels, window_size, step, binary_batch_size, genus_batch_size):
-    """
-    Worker function that processes tasks for a specific GPU.
-    Pulls tasks from the queue until it receives None (indicating no more tasks).
-    """
-    logging.info(f"GPU {gpu_id} worker started")
-    while True:
-        file = task_queue.get()
-        if file is None:  # Sentinel value to indicate end of queue
-            task_queue.task_done()
-            break
-            
-        run_r_script(file, gpu_id, output_dir, model_binary, model_genus, genus_labels, 
-                     window_size, step, binary_batch_size, genus_batch_size)
-        task_queue.task_done()
-
-def cpu_worker_pool(fasta_files, num_cpu_processes, output_dir, model_binary, model_genus, genus_labels, window_size, step, binary_batch_size, genus_batch_size):
-    """
-    Process files using CPU workers in a pool.
-    """
-    logging.info(f"Starting processing with {num_cpu_processes} CPU processes")
-    tasks = [
-        (file, None, output_dir, model_binary, model_genus, genus_labels, 
-         window_size, step, binary_batch_size, genus_batch_size)
-        for file in fasta_files
-    ]
-    
-    with mp.get_context("spawn").Pool(processes=num_cpu_processes, initializer=init_worker) as pool:
-        pool.starmap(run_r_script, tasks)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="VirusNet Tool")
@@ -227,44 +200,93 @@ if __name__ == "__main__":
         # Record the start time
         start_time = time.time()
 
-        # Use GPU or CPU processing
+        # Distribute files based on GPU or CPU processing
         if args.num_gpus > 0:
-            # Create a task queue for each GPU
-            gpu_queues = [queue.Queue() for _ in range(args.num_gpus)]
+            # Create a list of files for each GPU
+            gpu_file_lists = [[] for _ in range(args.num_gpus)]
             
-            # Distribute files among GPU queues (round-robin)
+            # Distribute files among GPUs (round-robin)
             for i, file in enumerate(fasta_files):
                 gpu_id = i % args.num_gpus
-                gpu_queues[gpu_id].put(file)
+                gpu_file_lists[gpu_id].append(file)
             
-            # Add sentinel values to signal the end of tasks
-            for q in gpu_queues:
-                q.put(None)
+            # Create temporary list files for each GPU
+            temp_list_files = []
+            for gpu_id, file_list in enumerate(gpu_file_lists):
+                # Create a temporary file with the list of FASTA files for this GPU
+                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=f'_gpu{gpu_id}.txt')
+                for file_path in file_list:
+                    temp_file.write(f"{file_path}\n")
+                temp_file.close()
+                temp_list_files.append(temp_file.name)
+                logging.info(f"GPU {gpu_id} will process {len(file_list)} files")
             
-            # Create and start a worker thread for each GPU
-            threads = []
-            for gpu_id, task_queue in enumerate(gpu_queues):
-                worker_thread = threading.Thread(
-                    target=gpu_worker,
-                    args=(gpu_id, task_queue, args.output_dir, args.model_binary, 
-                          args.model_genus, args.genus_labels, args.window_size, 
-                          args.step, args.binary_batch_size, args.genus_batch_size)
+            # Process each batch in parallel
+            processes = []
+            for gpu_id, fasta_list_file in enumerate(temp_list_files):
+                process = mp.Process(
+                    target=run_batch_r_script,
+                    args=(
+                        gpu_id, fasta_list_file, args.output_dir, args.model_binary,
+                        args.model_genus, args.genus_labels, args.window_size, args.step,
+                        args.binary_batch_size, args.genus_batch_size
+                    )
                 )
-                worker_thread.start()
-                threads.append(worker_thread)
+                process.start()
+                processes.append(process)
             
-            # Wait for all worker threads to complete
-            for thread in threads:
-                thread.join()
+            # Wait for all processes to complete
+            for process in processes:
+                process.join()
+                
+            # Clean up temporary files
+            for temp_file in temp_list_files:
+                os.unlink(temp_file)
                 
             logging.info("All GPU processing completed")
         else:
-            # Use CPU processing with a pool
-            cpu_worker_pool(
-                fasta_files, args.num_cpu_processes, args.output_dir, args.model_binary,
-                args.model_genus, args.genus_labels, args.window_size, args.step,
-                args.binary_batch_size, args.genus_batch_size
-            )
+            # For CPU mode, split files among CPU processes
+            cpu_file_lists = [[] for _ in range(args.num_cpu_processes)]
+            
+            # Distribute files among CPU processes (round-robin)
+            for i, file in enumerate(fasta_files):
+                process_id = i % args.num_cpu_processes
+                cpu_file_lists[process_id].append(file)
+            
+            # Create temporary list files for each CPU process
+            temp_list_files = []
+            for process_id, file_list in enumerate(cpu_file_lists):
+                # Create a temporary file with the list of FASTA files for this process
+                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=f'_cpu{process_id}.txt')
+                for file_path in file_list:
+                    temp_file.write(f"{file_path}\n")
+                temp_file.close()
+                temp_list_files.append(temp_file.name)
+                logging.info(f"CPU process {process_id} will process {len(file_list)} files")
+            
+            # Process each batch in parallel
+            processes = []
+            for process_id, fasta_list_file in enumerate(temp_list_files):
+                process = mp.Process(
+                    target=run_batch_r_script,
+                    args=(
+                        None, fasta_list_file, args.output_dir, args.model_binary,
+                        args.model_genus, args.genus_labels, args.window_size, args.step,
+                        args.binary_batch_size, args.genus_batch_size
+                    )
+                )
+                process.start()
+                processes.append(process)
+            
+            # Wait for all processes to complete
+            for process in processes:
+                process.join()
+                
+            # Clean up temporary files
+            for temp_file in temp_list_files:
+                os.unlink(temp_file)
+                
+            logging.info("All CPU processing completed")
 
         logging.info("All files have been processed")
 
